@@ -17,8 +17,8 @@ var auto_retry : bool = true
 var auto_retry_count : int = 3
 var auto_retry_backoff_base : int = 10
 
-## Maximum total duration in milliseconds across all retries.
-var max_total_timeout_ms : int = 1500
+## Maximum total duration in milliseconds across all retries. Set to 0 to disable.
+var max_total_timeout_ms : int = 10000
 
 ## Whether or not to use threads when making HTTP requests.
 var use_threads : bool = true
@@ -44,7 +44,7 @@ class AsyncRequest:
 	var timer : SceneTreeTimer = null
 	var cur_try : int = 1
 	var rng = RandomNumberGenerator.new()
-	var max_total_timeout_ms : int = 1500
+	var max_total_timeout_ms : int = 10000
 
 	func _init(p_id : int, p_request : HTTPRequest, p_uri : String,
 			p_method : int, p_headers : PackedStringArray, p_body : PackedByteArray,
@@ -204,8 +204,10 @@ static func _send_async(p_id : int, p_pending : Dictionary):
 
 	var req : AsyncRequest = p_pending[p_id]
 
-	var global_timer = req.request.get_tree().create_timer(req.max_total_timeout_ms / 1000.0)
-	global_timer.timeout.connect(req.cancel)
+	var global_timer : SceneTreeTimer = null
+	if req.max_total_timeout_ms > 0:
+		global_timer = req.request.get_tree().create_timer(req.max_total_timeout_ms / 1000.0)
+		global_timer.timeout.connect(req.cancel)
 
 	await req.make_request()
 
@@ -217,7 +219,7 @@ static func _send_async(p_id : int, p_pending : Dictionary):
 			break
 		await req.retry()
 
-	if global_timer.timeout.is_connected(req.cancel):
+	if global_timer != null and global_timer.timeout.is_connected(req.cancel):
 		global_timer.timeout.disconnect(req.cancel)
 
 	_clear_request(req, p_pending, p_id)
