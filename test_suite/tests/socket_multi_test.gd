@@ -2,7 +2,7 @@ extends "res://base_test.gd"
 
 var content = {"My": "message"}
 var match_string_props = {"region": "europe"}
-var match_numeric_props = {"rank": 8}
+var match_numeric_props = {"rank": 8.0}
 var got_msg = false
 var got_match = false
 var socket1 = null
