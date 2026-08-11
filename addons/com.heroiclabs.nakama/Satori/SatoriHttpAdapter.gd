@@ -17,6 +17,9 @@ var auto_retry : bool = true
 var auto_retry_count : int = 3
 var auto_retry_backoff_base : int = 10
 
+## Maximum total duration in milliseconds across all retries. Set to 0 to disable.
+var max_total_timeout_ms : int = 10000
+
 ## Whether or not to use threads when making HTTP requests.
 var use_threads : bool = true
 
@@ -41,10 +44,12 @@ class AsyncRequest:
 	var timer : SceneTreeTimer = null
 	var cur_try : int = 1
 	var rng = RandomNumberGenerator.new()
+	var max_total_timeout_ms : int = 10000
 
 	func _init(p_id : int, p_request : HTTPRequest, p_uri : String,
 			p_method : int, p_headers : PackedStringArray, p_body : PackedByteArray,
-			p_retry_count : int, p_backoff_time : int, p_logger : SatoriLogger):
+			p_retry_count : int, p_backoff_time : int, p_logger : SatoriLogger,
+			p_max_total_timeout_ms : int):
 		rng.seed = Time.get_ticks_usec()
 		id = p_id
 		request = p_request
@@ -55,9 +60,10 @@ class AsyncRequest:
 		retry_count = p_retry_count
 		backoff_time = p_backoff_time
 		logger = p_logger
+		max_total_timeout_ms = p_max_total_timeout_ms
 
 	func should_retry():
-		return cur_try < retry_count and not cancelled
+		return not cancelled and cur_try < retry_count
 
 	func retry():
 		var time = pow(backoff_time, cur_try) * rng.randf_range(0.5, 1)
@@ -171,7 +177,7 @@ func send_async(p_method : String, p_uri : String, p_headers : Dictionary, p_bod
 	id += 1
 	var retry = auto_retry_count if auto_retry else 0
 	var backoff = auto_retry_backoff_base
-	_pending[id] = AsyncRequest.new(id, req, p_uri, method, headers, p_body, retry, backoff, logger)
+	_pending[id] = AsyncRequest.new(id, req, p_uri, method, headers, p_body, retry, backoff, logger, max_total_timeout_ms)
 
 	logger.debug("Sending request [ID: %d, Method: %s, Uri: %s, Headers: %s, Body: %s, Timeout: %d, Retries: %d, Backoff base: %d ms]" % [
 		id, p_method, p_uri, p_headers, p_body.get_string_from_utf8(), timeout, retry, backoff
@@ -197,6 +203,12 @@ static func _clear_request(p_request : AsyncRequest, p_pending : Dictionary, p_i
 static func _send_async(p_id : int, p_pending : Dictionary):
 
 	var req : AsyncRequest = p_pending[p_id]
+
+	var global_timer : SceneTreeTimer = null
+	if req.max_total_timeout_ms > 0:
+		global_timer = req.request.get_tree().create_timer(req.max_total_timeout_ms / 1000.0)
+		global_timer.timeout.connect(req.cancel)
+
 	await req.make_request()
 
 	while req.result != HTTPRequest.RESULT_SUCCESS:
@@ -206,6 +218,9 @@ static func _send_async(p_id : int, p_pending : Dictionary):
 		if not req.should_retry():
 			break
 		await req.retry()
+
+	if global_timer != null and global_timer.timeout.is_connected(req.cancel):
+		global_timer.timeout.disconnect(req.cancel)
 
 	_clear_request(req, p_pending, p_id)
 	return req.parse_result()
